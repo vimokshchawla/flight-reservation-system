@@ -47,6 +47,9 @@ export default function Payment() {
   const total = useMemo(() => round2((bookings || []).reduce((s, b) => s + b.amount, 0)), [bookings]);
   const legs = useMemo(() => [...new Map((bookings || []).map((b) => [b.flight_id, b])).values()], [bookings]);
 
+  if (phase === 'failed' && !trip.bookingIds) {
+    return <div className="container-x py-16"><EmptyState title="Payment failed — booking rolled back" text={failure} action={<Link to="/booking"><Button>Choose seats again</Button></Link>} /></div>;
+  }
   if (!ids.length) return <div className="container-x py-16"><EmptyState title="Nothing to pay for" text="Start by searching for a flight." action={<Link to="/"><Button>Search flights</Button></Link>} /></div>;
   if (loadError) return <div className="container-x py-16"><Alert tone="error" title="Could not load your booking" onRetry={load}>{loadError}</Alert></div>;
   if (!bookings) return <PageLoader label="Loading booking summary…" />;
@@ -69,6 +72,7 @@ export default function Payment() {
       navigate('/confirmation', { replace: true });
     } catch (err) {
       setPhase('failed'); setFailure(err.message);
+      if (err.status === 402) setTrip({ bookingIds: null }); // rolled back
       if (err.status === 409) load();
     }
   };
@@ -91,7 +95,7 @@ export default function Payment() {
       <div className="mt-8 grid items-start gap-8 lg:grid-cols-[1fr_380px]">
         <section className="panel p-5 sm:p-7">
           <Alert tone="info" className="mb-6" title="Demo payment mode">
-            No real payment is taken and card details are never sent to the server. Use card <b>4000 0000 0000 0002</b> or UPI <b>fail@upi</b> to simulate a declined payment.
+            No real payment is taken and card details are never sent to the server. Use card <b>4000 0000 0000 0002</b> or UPI <b>fail@upi</b> to simulate a declined payment (the booking is rolled back).
           </Alert>
           <h2 className="label">Payment method</h2>
           <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">

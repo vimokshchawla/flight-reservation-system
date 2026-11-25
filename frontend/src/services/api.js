@@ -4,7 +4,7 @@
 import SEED from '../data-seed.json';
 
 export const SESSION_KEY = 'frs_session';
-const DB_KEY = 'frs_db_v2';
+const DB_KEY = 'frs_db_v3';
 const TAX_RATE = 0.12, BUSINESS = 2.5, METHODS = ['Card', 'UPI', 'NetBanking', 'Wallet'];
 
 // ---------- tiny table store ----------
@@ -205,8 +205,15 @@ export const paymentService = {
     if (!METHODS.includes(method)) fail(400, 'Choose a valid payment method.');
     if (list.some((b) => b.status !== 'Pending')) fail(409, 'These bookings are no longer awaiting payment.');
     const t = now();
-    list.forEach((b) => Object.assign(by('payments', 'booking_id', b.booking_id), { payment_method: method, payment_date: t, payment_status: simulate_failure ? 'Failed' : 'Paid' }));
-    if (simulate_failure) { save(); fail(402, 'Payment was declined by the bank (simulated). Your seats are still held - you can try again.'); }
+    if (!simulate_failure) list.forEach((b) => Object.assign(by('payments', 'booking_id', b.booking_id), { payment_method: method, payment_date: t, payment_status: 'Paid' }));
+    if (simulate_failure) {
+      // Rollback (Error 2): remove the half-finished bookings and their payment rows; the seats become free again
+      const ids = new Set(list.map((b) => b.booking_id));
+      db.bookings = db.bookings.filter((b) => !ids.has(b.booking_id));
+      db.payments = db.payments.filter((p) => !ids.has(p.booking_id));
+      save();
+      fail(402, 'Payment declined (simulated). The transaction was rolled back: no booking or payment was saved and the seats are free again.');
+    }
     list.forEach((b) => {
       b.status = 'Confirmed';
       const f = by('flights', 'flight_id', seatById(b.seat_id).flight_id);

@@ -66,12 +66,12 @@ function Footer() {
       <div className="container-x grid gap-10 py-14 md:grid-cols-[1.4fr_1fr_1fr_1fr]">
         <div>
           <Logo light />
-          <p className="mt-4 max-w-xs text-sm leading-relaxed">A flight reservation system built on a normalized MySQL database: live seat availability, atomic bookings and integrity enforced by the database itself.</p>
+          <p className="mt-4 max-w-xs text-sm leading-relaxed">A flight reservation system built on a normalized 12-table relational schema: live seat availability, safe bookings and consistent payments.</p>
         </div>
         {[
           ['Travel', [['Search flights', '/'], ['My bookings', '/my-bookings'], ['Sign in', '/login']]],
           ['Operations', [['Admin dashboard', '/admin'], ['Manage flights', '/admin/flights'], ['Payments', '/admin/payments']]],
-          ['Project', [['DBMS — Flight Reservation System', null], ['MySQL · Express · React', null], ['Team 3O21', null]]],
+          ['Project', [['DBMS — Flight Reservation System', null], ['React · Vite · Tailwind', null], ['Team 3O21', null]]],
         ].map(([h, items]) => (
           <div key={h}>
             <h4 className="mb-4 text-xs font-semibold uppercase tracking-[0.18em] text-white">{h}</h4>
