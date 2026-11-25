@@ -3,6 +3,7 @@
 import 'dotenv/config';
 import fs from 'node:fs';
 import path from 'node:path';
+import os from 'node:os';
 import { schemaSql, seedSql } from './sql.js';
 
 // getBuiltinModule works in both ES modules and bundled CommonJS (no top-level await / import.meta needed)
@@ -11,13 +12,18 @@ if (!sqlite?.DatabaseSync) {
   throw new Error(`This backend needs Node.js 22.13 or newer (running ${process.version}). Install the LTS version from https://nodejs.org`);
 }
 const { DatabaseSync } = sqlite;
-// On Vercel only /tmp is writable, and it is reset whenever a new instance starts.
-export const DB_FILE = process.env.VERCEL ? '/tmp/flight_reservation.db'
-  : path.resolve(process.cwd(), process.env.DB_FILE || 'data/flight_reservation.db');
+// Use backend/data locally; if that folder is read-only (Vercel, other serverless hosts) use the temp folder.
+function pickDbFile() {
+  const local = path.resolve(process.cwd(), process.env.DB_FILE || 'data/flight_reservation.db');
+  if (!process.env.VERCEL) {
+    try { fs.mkdirSync(path.dirname(local), { recursive: true }); fs.accessSync(path.dirname(local), fs.constants.W_OK); return local; } catch { /* read-only */ }
+  }
+  return path.join(os.tmpdir(), 'flight_reservation.db');
+}
+export const DB_FILE = pickDbFile();
 
 if (process.argv.includes('--reset') && fs.existsSync(DB_FILE)) fs.rmSync(DB_FILE);
 const fresh = !fs.existsSync(DB_FILE);
-fs.mkdirSync(path.dirname(DB_FILE), { recursive: true });
 const db = new DatabaseSync(DB_FILE);
 db.exec('PRAGMA foreign_keys = ON; PRAGMA journal_mode = WAL;');
 if (fresh) {
