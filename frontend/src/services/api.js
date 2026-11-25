@@ -4,7 +4,7 @@
 import SEED from '../data-seed.json';
 
 export const SESSION_KEY = 'frs_session';
-const DB_KEY = 'frs_db_v1';
+const DB_KEY = 'frs_db_v2';
 const TAX_RATE = 0.12, BUSINESS = 2.5, METHODS = ['Card', 'UPI', 'NetBanking', 'Wallet'];
 
 // ---------- tiny table store ----------
@@ -16,12 +16,15 @@ const COLS = {
   admins: ['admin_id', 'user_id', 'admin_name'], bookings: ['booking_id', 'booking_date', 'status', 'passenger_id', 'seat_id'],
   tickets: ['ticket_id', 'ticket_number', 'issue_date', 'booking_id'], payments: ['payment_id', 'amount', 'payment_date', 'payment_method', 'payment_status', 'booking_id'],
 };
+// Stored compactly as arrays (same layout as data-seed.json) to stay well inside the browser's ~5 MB limit
+const fromRows = (data) => Object.fromEntries(Object.entries(COLS).map(([t, cols]) => [t, data[t].map((r) => Object.fromEntries(cols.map((c, i) => [c, r[i]])))]));
+const toRows = () => Object.fromEntries(Object.entries(COLS).map(([t, cols]) => [t, db[t].map((r) => cols.map((c) => r[c]))]));
 function load() {
-  try { const s = JSON.parse(localStorage.getItem(DB_KEY)); if (s?.flights) return s; } catch { /* fresh */ }
-  return Object.fromEntries(Object.entries(COLS).map(([t, cols]) => [t, SEED[t].map((r) => Object.fromEntries(cols.map((c, i) => [c, r[i]])))]));
+  try { const s = JSON.parse(localStorage.getItem(DB_KEY)); if (s?.flights) return fromRows(s); } catch { /* fresh */ }
+  return fromRows(SEED);
 }
 let db = load();
-const save = () => { try { localStorage.setItem(DB_KEY, JSON.stringify(db)); } catch { /* storage full: keep in memory */ } };
+const save = () => { try { localStorage.setItem(DB_KEY, JSON.stringify(toRows())); } catch { /* storage full: keep in memory */ } };
 const nextId = (t, k) => db[t].reduce((m, r) => Math.max(m, r[k]), 0) + 1;
 export const resetDatabase = () => { localStorage.removeItem(DB_KEY); db = load(); };
 
@@ -49,17 +52,27 @@ for (let r = 1; r <= 14; r++) for (const c of 'ABCDEF') if (r > 2 || 'ACDF'.incl
 const seatsOf = (fid) => LAYOUT.map(([n, c], i) => ({ seat_id: (fid - 1) * 80 + i + 1, flight_id: fid, seat_number: n, seat_class: c }));
 const seatById = (id) => { const fid = Math.floor((id - 1) / 80) + 1, i = (id - 1) % 80; return db.flights.some((f) => f.flight_id === fid) ? seatsOf(fid)[i] : null; };
 const activeSeats = () => new Set(db.bookings.filter((b) => b.status !== 'Cancelled').map((b) => b.seat_id));
+const BUS_SLOTS = 8; // positions 1-8 in the layout are Business
+function takenCounts(set) {
+  const m = new Map();
+  for (const id of set) {
+    const fid = Math.floor((id - 1) / 80) + 1, cls = (id - 1) % 80 < BUS_SLOTS ? 'b' : 'e';
+    const r = m.get(fid) || { e: 0, b: 0 }; r[cls]++; m.set(fid, r);
+  }
+  return m;
+}
+let countCache = { set: null, map: null };
+const countsFor = (set) => (countCache.set === set ? countCache.map : (countCache = { set, map: takenCounts(set) }).map);
 
 const by = (t, k, v) => db[t].find((r) => r[k] === v);
 const airportFull = (id) => { const a = by('airports', 'airport_id', id); const c = by('cities', 'city_id', a.city_id); return { ...a, city_name: c.city_name, country: c.country }; };
 function flightFull(f, taken = activeSeats()) {
   const ac = by('aircraft', 'aircraft_id', f.aircraft_id), al = by('airlines', 'airline_id', ac.airline_id);
   const s = airportFull(f.src_airport_id), d = airportFull(f.dest_airport_id);
-  const seats = seatsOf(f.flight_id);
-  const free = (cls) => seats.filter((x) => x.seat_class === cls && !taken.has(x.seat_id)).length;
+  const c = countsFor(taken).get(f.flight_id) || { e: 0, b: 0 };
   return { ...f, airline_id: al.airline_id, airline_name: al.airline_name, model_number: ac.model_number,
     src_code: s.iata_code, src_name: s.airport_name, src_city: s.city_name, dest_code: d.iata_code, dest_name: d.airport_name, dest_city: d.city_name,
-    eco_available: free('Economy'), bus_available: free('Business'), duration_min: mins(f.dep_datetime, f.arr_datetime),
+    eco_available: 72 - c.e, bus_available: BUS_SLOTS - c.b, duration_min: mins(f.dep_datetime, f.arr_datetime),
     economy_fare: fare(f.base_fare, 'Economy'), business_fare: fare(f.base_fare, 'Business'), departed: f.dep_datetime <= now() };
 }
 function bookingFull(b) {
@@ -283,9 +296,9 @@ export const adminService = {
     requireAdmin();
     const t = now(), sum = (s) => r2(db.payments.filter((p) => p.payment_status === s).reduce((a, p) => a + p.amount, 0));
     const count = (s) => db.bookings.filter((b) => b.status === s).length;
-    const confirmed = new Set(db.bookings.filter((b) => b.status === 'Confirmed').map((b) => b.seat_id));
+    const conf = takenCounts(new Set(db.bookings.filter((b) => b.status === 'Confirmed').map((b) => b.seat_id)));
     const occ = db.flights.filter((f) => f.dep_datetime > t).map((f) => {
-      const booked = seatsOf(f.flight_id).filter((s) => confirmed.has(s.seat_id)).length;
+      const c = conf.get(f.flight_id) || { e: 0, b: 0 }, booked = c.e + c.b;
       return { flight_id: f.flight_id, flight_number: f.flight_number, dep_datetime: f.dep_datetime, src_code: airportFull(f.src_airport_id).iata_code, dest_code: airportFull(f.dest_airport_id).iata_code, total_seats: 80, booked_seats: booked, occupancy_pct: r2(booked * 100 / 80) };
     });
     const airline = new Map();
