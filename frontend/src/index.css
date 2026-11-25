@@ -1,0 +1,48 @@
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-display: "Fraunces", Georgia, "Times New Roman", serif;
+  --color-ink-950: #06111f;
+  --color-ink-900: #0b1f3a;
+  --color-ink-800: #13294b;
+  --color-ink-700: #23406b;
+  --color-ink-500: #52688a;
+  --color-ink-400: #7d8fa9;
+  --color-mist-50: #f6f8fb;
+  --color-mist-100: #eef3f9;
+  --color-mist-200: #dfe7f1;
+  --color-mist-300: #c9d5e4;
+  --color-brand-50: #eaf1fb;
+  --color-brand-100: #d4e3f6;
+  --color-brand-500: #2f62a8;
+  --color-brand-600: #24508f;
+  --color-brand-700: #1c4075;
+  --color-gold-100: #f8eedb;
+  --color-gold-500: #c08a2e;
+  --color-gold-600: #a37320;
+}
+
+@layer base {
+  body { @apply bg-mist-50 text-ink-900 font-sans antialiased; }
+  h1, h2, h3 { @apply text-ink-900; }
+  ::selection { @apply bg-brand-100; }
+  input[type="date"]::-webkit-calendar-picker-indicator,
+  input[type="datetime-local"]::-webkit-calendar-picker-indicator { opacity: .55; cursor: pointer; }
+}
+
+@layer components {
+  .container-x { @apply mx-auto w-full max-w-7xl px-4 sm:px-6 lg:px-8; }
+  .panel { @apply rounded-2xl border border-mist-200 bg-white; }
+  .label { @apply mb-1.5 block text-xs font-semibold uppercase tracking-wider text-ink-500; }
+  .control { @apply h-11 w-full rounded-xl border border-mist-300 bg-white px-3.5 text-[15px] text-ink-900 outline-none transition placeholder:text-ink-400 focus:border-brand-500 focus:ring-4 focus:ring-brand-100 disabled:bg-mist-100; }
+  .control-error { @apply border-red-400 focus:border-red-500 focus:ring-red-100; }
+  .eyebrow { @apply text-xs font-semibold uppercase tracking-[0.18em] text-gold-600; }
+  .ticket-cut { background-image: radial-gradient(circle at 0 50%, var(--color-mist-50) 10px, transparent 11px), radial-gradient(circle at 100% 50%, var(--color-mist-50) 10px, transparent 11px); }
+}
+
+@media print {
+  .no-print { display: none !important; }
+  body { background: white; }
+  .print-break { break-inside: avoid; }
+}
