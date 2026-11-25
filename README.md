@@ -2,14 +2,15 @@
 
 Full-stack flight reservation system built on the normalized schema from Assignments 1–4:
 
-- **MySQL 8**: 12-table 3NF/BCNF schema with keys, constraints and realistic sample data
-- **Node.js + Express**: REST API that reads and changes real database rows
+- **SQLite (embedded)**: 12-table 3NF/BCNF schema with keys, constraints and realistic sample data, created automatically
+- **Node.js + Express**: REST API that reads and changes real database rows (no database server to install)
 - **React + Vite + Tailwind CSS**: customer booking site plus an admin dashboard
 
 ```
 flight-reservation-system/
 ├── database/
-│   ├── flight_reservation_system.sql   ← ONE file: creates the DB, tables, relationships and sample data
+│   ├── sqlite/schema.sql, sqlite/seed.sql ← used by the app (loaded automatically)
+│   ├── flight_reservation_system.sql   ← MySQL version of the same database (optional)
 │   ├── schema.sql                      ← tables only (same as the first half of the file above)
 │   ├── seed.sql                        ← sample data only (run after schema.sql)
 │   └── queries.sql                     ← Assignment-4 queries rewritten for MySQL, for the demo
@@ -18,7 +19,7 @@ flight-reservation-system/
 │   ├── package.json
 │   └── src/
 │       ├── server.js        Express app, error mapping (MySQL error codes → HTTP)
-│       ├── db.js            mysql2 connection pool + transaction helper
+│       ├── db.js            SQLite connection, auto-setup, transaction helper
 │       ├── queries.js       shared SQL (flight search, booking details, cancellation)
 │       ├── utils.js         fares, tokens, validation, seat layout
 │       └── routes/
@@ -38,70 +39,28 @@ flight-reservation-system/
 
 ---
 
-## 1. Install the prerequisites
+## 1. Install the prerequisite
 
-| Tool | Version | Download |
-|---|---|---|
-| MySQL Server + MySQL Workbench | 8.0 or newer | https://dev.mysql.com/downloads/installer/ (Windows) or https://dev.mysql.com/downloads/mysql/ (macOS/Linux) |
-| Node.js (includes npm) | 18 or newer (20 LTS recommended) | https://nodejs.org |
+Only **Node.js 22.13 or newer** (the current LTS from https://nodejs.org is fine). Check with `node -v`.
+No database server is needed: the backend uses SQLite, which is built into Node.js.
 
-**Installing MySQL (Windows):** run *MySQL Installer*, choose **Developer Default** (or Server + Workbench), keep port **3306**, and set a **root password** — you'll need it in step 3.
-**macOS:** install the MySQL DMG and MySQL Workbench, then start MySQL from *System Settings → MySQL*.
-**Linux (Ubuntu):** `sudo apt install mysql-server`, then `sudo mysql` and run
-`ALTER USER 'root'@'localhost' IDENTIFIED WITH mysql_native_password BY 'your_password';`
-
-Check that Node works: `node -v` and `npm -v`.
-
-## 2. Create and populate the database (MySQL Workbench)
-
-1. Open **MySQL Workbench** and connect to your local instance (`root`, port 3306).
-2. **File → Open SQL Script…** and choose `database/flight_reservation_system.sql`.
-3. Click the **lightning bolt** (Execute all), or press `Ctrl+Shift+Enter` / `Cmd+Shift+Enter`.
-4. In the *Schemas* panel click the refresh icon. `flight_reservation_system` appears with 12 tables.
-
-Quick check (new query tab):
-
-```sql
-USE flight_reservation_system;
-SELECT COUNT(*) FROM FLIGHT;   -- 304
-SELECT COUNT(*) FROM SEAT;     -- 24,320 (80 per flight)
-SELECT COUNT(*) FROM BOOKING;  -- about 4,200
-```
-
-> The script starts with `DROP DATABASE IF EXISTS flight_reservation_system`, so you can re-run it any time to reset the demo data.
-> Command-line alternative: `mysql -u root -p < database/flight_reservation_system.sql`
-
-**What's in the sample data:** 6 airlines, 10 aircraft, 13 cities, 15 airports (Delhi and Goa each have two airports), **304 flights** from 6 Nov to 21 Dec 2026 (past and upcoming, 30 routes including international), 80 seats per flight, 160 passengers, about 4,200 bookings with tickets and payments, and 3 user accounts. The Assignment-4 sample rows are kept as IDs 1–6 (AI101 / 6E202 on 10 Dec 2026, Rahul's and Amit's bookings, and so on).
-
-## 3. Configure and run the backend
+## 2. Run the backend (creates the database automatically)
 
 ```bash
 cd backend
 npm install
-cp .env.example .env          # Windows PowerShell: copy .env.example .env
+npm run dev
 ```
 
-Edit `backend/.env`:
+On the first start it creates `backend/data/flight_reservation.db` from `database/sqlite/schema.sql` and `database/sqlite/seed.sql`:
+6 airlines, 10 aircraft, 15 airports, **304 flights**, 24,320 seats, 160 passengers and about 4,200 bookings with tickets and payments.
+Open http://localhost:5000/api/health and you should see `"flights":304`.
 
-```ini
-PORT=5000
-DB_HOST=localhost
-DB_PORT=3306
-DB_USER=root
-DB_PASSWORD=your_mysql_password      # the root password from step 1
-DB_NAME=flight_reservation_system
-AUTH_SECRET=any-long-random-string
-CORS_ORIGIN=http://localhost:5173
-```
+- Reset to fresh sample data at any time: stop the server, run `npm run db:reset`, start again.
+- A `.env` file is optional; see `backend/.env.example` for the defaults.
+- To browse the data, open the `.db` file in **DB Browser for SQLite** (free, https://sqlitebrowser.org).
 
-```bash
-npm run dev        # or: npm start
-```
-
-Open http://localhost:5000/api/health. It should show `{"status":"ok", ..., "flights":304}`.
-If it shows *Cannot reach the MySQL database*, check the password, that MySQL is running, and that step 2 completed.
-
-## 4. Run the frontend
+## 3. Run the frontend
 
 In a second terminal:
 
@@ -111,8 +70,12 @@ npm install
 npm run dev
 ```
 
-Open **http://localhost:5173**. Vite proxies `/api` to `http://localhost:5000`, so no extra configuration is needed.
-Production build: `npm run build`, then `npm run preview`.
+Open **http://localhost:5173**. Vite forwards `/api` requests to the backend on port 5000.
+
+## 4. MySQL scripts (optional, for the DBMS course)
+
+`database/flight_reservation_system.sql`, `schema.sql`, `seed.sql` and `queries.sql` are the same design in MySQL 8 syntax.
+They are not needed to run the app; use them only if you want to show the database in MySQL Workbench.
 
 ## 5. Demo script (about 5 minutes)
 
@@ -125,7 +88,7 @@ Production build: `npm run build`, then `npm run preview`.
 2. **Filter and sort** by price, departure time and airline. Try a **round trip** with 2 passengers.
 3. **Book**: fill in passenger details (validation runs on every field) and pick seats on the seat map. Occupied seats come from BOOKING rows with status Confirmed or Pending.
 4. **Continue to payment**: the bookings are now **Pending** in MySQL and the seats are held.
-   Show it in Workbench: `SELECT * FROM BOOKING ORDER BY booking_id DESC LIMIT 4;`
+   Show it in DB Browser for SQLite: `SELECT * FROM BOOKING ORDER BY booking_id DESC LIMIT 4;`
 5. **Pay** with card `4000 0000 0000 0002` to show a **declined** payment (PAYMENT = Failed, BOOKING stays Pending). Then pay with any other 16-digit card, for example `4111 1111 1111 1111`, with a future expiry and any CVV. The booking becomes **Confirmed** and a **TICKET** row is inserted.
 6. **Ticket**: print it or download it as an HTML e-ticket.
 7. **My bookings**: look up the booking by reference + email (or sign in as `rahul01`) and **cancel** it. BOOKING becomes Cancelled, PAYMENT becomes Refunded, and the seat is free again because availability is derived, not stored.
@@ -134,7 +97,7 @@ Production build: `npm run build`, then `npm run preview`.
    - Try to delete a flight that has bookings. The delete is refused, as Assignment-4 Req 17 requires.
    - Try to delete an airline that owns aircraft. The foreign key refuses it.
    - Set a flight's arrival before its departure, or reuse a passenger email. The CHECK or UNIQUE constraint rejects it.
-9. Run `database/queries.sql` in Workbench to show every Assignment-4 query on live data.
+9. Optional: run `database/queries.sql` in MySQL Workbench to show the Assignment-4 queries in MySQL.
 
 ## 6. Requirement coverage
 
@@ -167,7 +130,7 @@ The final normalized schema from Assignment-3 is implemented as written. These a
 
 ## 8. API reference and backend connection
 
-The frontend never talks to MySQL directly. All calls go through `frontend/src/services/api.js`, which calls the Express API. Database credentials live only in `backend/.env`.
+The frontend never talks to the database directly. All calls go through `frontend/src/services/api.js`, which calls the Express API.
 
 | Method | Endpoint | Purpose |
 |---|---|---|
@@ -192,9 +155,8 @@ The frontend never talks to MySQL directly. All calls go through `frontend/src/s
 
 ## Troubleshooting
 
-- **`ER_ACCESS_DENIED_ERROR`**: wrong `DB_USER` / `DB_PASSWORD` in `backend/.env`.
-- **`ER_BAD_DB_ERROR`**: the SQL script hasn't been run. Repeat step 2.
+- **"This backend needs Node.js 22.13 or newer"**: install the current LTS from https://nodejs.org.
 - **Frontend says "Cannot reach the server"**: the backend isn't running on port 5000.
-- **Port 5000 busy (common on macOS, AirPlay)**: set `PORT=5001` in `backend/.env` and change the proxy target in `frontend/vite.config.js`.
-- **No flights found**: the sample flights run 6 Nov – 21 Dec 2026, and search only shows flights that haven't departed. Pick a date in that range, or re-run the SQL script with later dates.
-- **MySQL 5.7**: not supported (needs CHECK constraints and the `utf8mb4_0900_ai_ci` collation from 8.0).
+- **Port 5000 busy (common on macOS)**: set `PORT=5001` in `backend/.env` and change the proxy target in `frontend/vite.config.js`.
+- **No flights found**: sample flights run 6 Nov – 21 Dec 2026, and search hides departed flights. Pick a date in that range.
+- **Start over with clean data**: `npm run db:reset` in `backend`.
