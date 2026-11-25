@@ -40,7 +40,7 @@ export default function Home() {
         <div className="container-x relative pb-44 pt-20 sm:pt-28">
           <p className="eyebrow text-gold-100/90">Flight Reservation System</p>
           <h1 className="mt-4 max-w-3xl font-display text-4xl font-semibold leading-[1.08] text-white sm:text-6xl">Book the seat you want, on the flight you need.</h1>
-          <p className="mt-5 max-w-xl text-base leading-relaxed text-white/75 sm:text-lg">Live availability on 300+ flights across India and beyond. Pick your seat, pay securely and get your e-ticket in minutes.</p>
+          <p className="mt-5 max-w-xl text-base leading-relaxed text-white/75 sm:text-lg">Live availability on 11,000+ flights across India and beyond. Pick your seat, pay securely and get your e-ticket in minutes.</p>
         </div>
       </section>
 

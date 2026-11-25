@@ -18,7 +18,7 @@ export default function AirportPicker({ label, icon: Icon = MapPin, airports, va
 
   const matches = useMemo(() => {
     const t = text.trim().toLowerCase();
-    return airports.filter((a) => !t || `${a.iata_code} ${a.city_name} ${a.airport_name} ${a.country}`.toLowerCase().includes(t)).slice(0, 8);
+    return airports.filter((a) => !t || `${a.iata_code} ${a.city_name} ${a.airport_name} ${a.country}`.toLowerCase().includes(t));
   }, [airports, text]);
 
   const pick = (a) => { onChange(a.iata_code); setOpen(false); setText(''); };
