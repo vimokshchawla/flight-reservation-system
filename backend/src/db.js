@@ -1,60 +1,92 @@
-// MongoDB connection with pooling + resilience (Week 2)
-const mongoose = require('mongoose');
-const dns = require('dns');
+// Embedded SQLite database (built into Node.js 22.13+). No database server to install.
+// On first start the file is created from database/sqlite/schema.sql + seed.sql (bundled in src/sql.js).
+import 'dotenv/config';
+import fs from 'node:fs';
+import path from 'node:path';
+import { schemaSql, seedSql } from './sql.js';
 
-// Fix for "querySrv ECONNREFUSED" on Windows: Node's resolver can fail SRV lookups for
-// mongodb+srv:// URIs. Use public DNS for them (override with DNS_SERVERS=ip1,ip2; set DNS_SERVERS=system to skip).
-function configureDns(uri) {
-  if (!uri.startsWith('mongodb+srv://') || process.env.DNS_SERVERS === 'system') return;
-  dns.setServers((process.env.DNS_SERVERS || '8.8.8.8,1.1.1.1').split(',').map((s) => s.trim()));
+// getBuiltinModule works in both ES modules and bundled CommonJS (no top-level await / import.meta needed)
+const sqlite = typeof process.getBuiltinModule === 'function' ? process.getBuiltinModule('node:sqlite') : null;
+if (!sqlite?.DatabaseSync) {
+  throw new Error(`This backend needs Node.js 22.13 or newer (running ${process.version}). Install the LTS version from https://nodejs.org`);
+}
+const { DatabaseSync } = sqlite;
+// On Vercel only /tmp is writable, and it is reset whenever a new instance starts.
+export const DB_FILE = process.env.VERCEL ? '/tmp/flight_reservation.db'
+  : path.resolve(process.cwd(), process.env.DB_FILE || 'data/flight_reservation.db');
+
+if (process.argv.includes('--reset') && fs.existsSync(DB_FILE)) fs.rmSync(DB_FILE);
+const fresh = !fs.existsSync(DB_FILE);
+fs.mkdirSync(path.dirname(DB_FILE), { recursive: true });
+const db = new DatabaseSync(DB_FILE);
+db.exec('PRAGMA foreign_keys = ON; PRAGMA journal_mode = WAL;');
+if (fresh) {
+  console.log('Creating database with sample data (first run)...');
+  db.exec(schemaSql);
+  db.exec(seedSql);
+  console.log(`Database ready: ${DB_FILE}`);
+}
+if (process.argv.includes('--reset')) process.exit(0);
+
+// Expand array parameters like mysql2: IN (?) with [1,2,3]  and  VALUES ? with [[a,b],[c,d]]
+function expand(sql, params) {
+  const out = [];
+  let i = 0;
+  const text = sql.replace(/\?/g, () => {
+    const p = params[i++];
+    if (Array.isArray(p)) {
+      if (Array.isArray(p[0])) { p.forEach((r) => out.push(...r)); return p.map((r) => `(${r.map(() => '?').join(',')})`).join(','); }
+      out.push(...p); return p.map(() => '?').join(',');
+    }
+    out.push(p === undefined ? null : p);
+    return '?';
+  });
+  return [text, out];
 }
 
-mongoose.set('strictQuery', true);
-// Build indexes automatically in dev; in prod run `npm run db:indexes` instead.
-mongoose.set('autoIndex', process.env.NODE_ENV !== 'production');
+// Give SQLite errors the same codes the routes already handle (MySQL style)
+function mapError(e, sql) {
+  const m = e.message || '';
+  const err = new Error(m);
+  err.sqlMessage = m;
+  err.code = /UNIQUE/.test(m) ? 'ER_DUP_ENTRY'
+    : /FOREIGN KEY/.test(m) ? (/^\s*DELETE/i.test(sql) ? 'ER_ROW_IS_REFERENCED_2' : 'ER_NO_REFERENCED_ROW_2')
+      : /CHECK/.test(m) ? 'ER_CHECK_CONSTRAINT_VIOLATED' : 'DB_ERROR';
+  return err;
+}
 
-const options = {
-  maxPoolSize: Number(process.env.DB_MAX_POOL || 10), // Atlas M0 allows 500 conns; keep small per instance
-  minPoolSize: Number(process.env.DB_MIN_POOL || 2),
-  serverSelectionTimeoutMS: 10000, // fail fast if Atlas unreachable / IP not whitelisted
-  socketTimeoutMS: 45000,
-  maxIdleTimeMS: 60000,
-  retryWrites: true,
-  w: 'majority',
-};
-
-let isConnected = false;
-
-async function connectDB(uri = process.env.MONGODB_URI) {
-  if (isConnected) return mongoose.connection;
-  if (!uri) throw new Error('MONGODB_URI is not set');
-  configureDns(uri);
-
-  mongoose.connection.on('connected', () => console.log(`[db] connected → ${mongoose.connection.name}`));
-  mongoose.connection.on('error', (err) => console.error('[db] error:', err.message));
-  mongoose.connection.on('disconnected', () => { isConnected = false; console.warn('[db] disconnected'); });
-
-  for (let attempt = 1; attempt <= 5; attempt++) {
-    try {
-      await mongoose.connect(uri, options);
-      isConnected = true;
-      return mongoose.connection;
-    } catch (err) {
-      console.error(`[db] connect attempt ${attempt} failed: ${err.message}`);
-      if (attempt === 5) throw err;
-      await new Promise((r) => setTimeout(r, attempt * 2000)); // linear backoff
-    }
+function run(sql, params = []) {
+  const [text, values] = expand(sql, params);
+  try {
+    const st = db.prepare(text);
+    if (/^\s*(SELECT|WITH)/i.test(text)) return st.all(...values).map((r) => ({ ...r }));
+    const r = st.run(...values);
+    return { insertId: Number(r.lastInsertRowid), affectedRows: Number(r.changes) };
+  } catch (e) {
+    throw mapError(e, text);
   }
 }
 
-async function disconnectDB() {
-  await mongoose.connection.close();
-  isConnected = false;
-}
+// One connection: transactions are serialised so requests never interleave inside one.
+let lock = Promise.resolve();
+const withLock = (fn) => {
+  const next = lock.then(fn, fn);
+  lock = next.catch(() => {});
+  return next;
+};
 
-// Graceful shutdown so pooled sockets are released
-['SIGINT', 'SIGTERM'].forEach((sig) =>
-  process.once(sig, async () => { await disconnectDB(); process.exit(0); })
-);
+/** Run one parameterised query: rows for SELECT, { insertId, affectedRows } otherwise. */
+export const q = (sql, params = []) => withLock(() => run(sql, params));
 
-module.exports = { connectDB, disconnectDB };
+/** Run fn(query) inside a transaction; commits on success, rolls back on error. */
+export const tx = (fn) => withLock(async () => {
+  db.exec('BEGIN IMMEDIATE');
+  try {
+    const result = await fn(async (sql, params = []) => run(sql, params));
+    db.exec('COMMIT');
+    return result;
+  } catch (e) {
+    db.exec('ROLLBACK');
+    throw e;
+  }
+});
